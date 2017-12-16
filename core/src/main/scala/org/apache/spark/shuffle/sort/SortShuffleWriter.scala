@@ -49,6 +49,8 @@ private[spark] class SortShuffleWriter[K, V, C](
 
   /** Write a bunch of records to this task's output */
   override def write(records: Iterator[Product2[K, V]]): Unit = {
+    // 是否map端需要在本地进行combine操作，如果需要，则需要传入aggregator和keyOrdering，创建ExternalSorter
+    // aggregator用于指示进行combiner的操作( keyOrdering用于传递key的排序规则);
     sorter = if (dep.mapSideCombine) {
       require(dep.aggregator.isDefined, "Map-side combine without Aggregator specified!")
       new ExternalSorter[K, V, C](
@@ -57,9 +59,13 @@ private[spark] class SortShuffleWriter[K, V, C](
       // In this case we pass neither an aggregator nor an ordering to the sorter, because we don't
       // care whether the keys get sorted in each partition; that will be done on the reduce side
       // if the operation being run is sortByKey.
+      // 如果不需要在本地进行combine操作, 就不需要aggregator和keyOrdering
+      // 那么本地每个分区的数据不会做聚合和排序
       new ExternalSorter[K, V, V](
         context, aggregator = None, Some(dep.partitioner), ordering = None, dep.serializer)
-    }
+    };
+
+    // 将写入数据全部放入外部排序器ExternalSorter,并且根据是否需要spill进行spill操作.
     sorter.insertAll(records)
 
     // Don't bother including the time to open the merged output file in the shuffle write time,
@@ -106,10 +112,13 @@ private[spark] class SortShuffleWriter[K, V, C](
 private[spark] object SortShuffleWriter {
   def shouldBypassMergeSort(conf: SparkConf, dep: ShuffleDependency[_, _, _]): Boolean = {
     // We cannot bypass sorting if we need to do map-side aggregation.
+    // 不能指定aggregator,即不能聚合
+    // 不能指定ordering，即分区内数据不能排序
     if (dep.mapSideCombine) {
       require(dep.aggregator.isDefined, "Map-side combine without Aggregator specified!")
       false
     } else {
+      // 分区的数目 < spark.shuffle.sort.bypassMergeThrshold指定的阀值
       val bypassMergeThreshold: Int = conf.getInt("spark.shuffle.sort.bypassMergeThreshold", 200)
       dep.partitioner.numPartitions <= bypassMergeThreshold
     }

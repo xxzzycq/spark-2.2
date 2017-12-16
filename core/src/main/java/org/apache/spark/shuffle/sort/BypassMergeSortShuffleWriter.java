@@ -130,13 +130,21 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     }
     final SerializerInstance serInstance = serializer.newInstance();
     final long openStartTime = System.nanoTime();
+    // 构建一个对于task结果进行分区的数量的writer数组，即每一个分区对应着一个writer
+    // 这种写入方式，会同时打开numPartition个writer,所以分区数不宜设置过大
+    // 避免带来过重的内存开销。现在默认writer的缓存大小是32k，比起以前100k小太多了
     partitionWriters = new DiskBlockObjectWriter[numPartitions];
+    // 构建一个对于task结果进行分区的数量的FileSegment数组，寄一个分区的writer对应着一组FileSegment
     partitionWriterSegments = new FileSegment[numPartitions];
     for (int i = 0; i < numPartitions; i++) {
+      // 创建临时的shuffle block,返回一个(shuffle blockid,file)的元组
       final Tuple2<TempShuffleBlockId, File> tempShuffleBlockIdPlusFile =
         blockManager.diskBlockManager().createTempShuffleBlock();
+      // 获取该分区对应的文件
       final File file = tempShuffleBlockIdPlusFile._2();
+      // 获取该分区对应的blockId
       final BlockId blockId = tempShuffleBlockIdPlusFile._1();
+      // 构造每一个分区的writer
       partitionWriters[i] =
         blockManager.getDiskWriter(blockId, file, serInstance, fileBufferSize, writeMetrics);
     }
@@ -145,28 +153,38 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     // included in the shuffle write time.
     writeMetrics.incWriteTime(System.nanoTime() - openStartTime);
 
+    // 如果有数据，获取数据，对key进行分区，然后将<key,value>写入该分区对应的文件
     while (records.hasNext()) {
       final Product2<K, V> record = records.next();
       final K key = record._1();
       partitionWriters[partitioner.getPartition(key)].write(key, record._2());
     }
 
+    // 遍历所有分区的writer列表，刷新数据到文件，构建FileSegment数组
     for (int i = 0; i < numPartitions; i++) {
       final DiskBlockObjectWriter writer = partitionWriters[i];
+      // 把数据刷到磁盘，构建一个FileSegment
       partitionWriterSegments[i] = writer.commitAndGet();
       writer.close();
     }
 
+    // 根据shuffleId和mapId，构建ShuffleDataBlockId，创建文件，文件格式为:
+    //shuffle_{shuffleId}_{mapId}_{reduceId}.data
     File output = shuffleBlockResolver.getDataFile(shuffleId, mapId);
+    // 创建临时文件
     File tmp = Utils.tempFileWith(output);
     try {
+      // 合并前面的生成的各个中间临时文件，并获取分区对应的数据大小，然后就可以计算偏移量
       partitionLengths = writePartitionedFile(tmp);
+      // 创建索引文件，将每一个分区的起始位置、结束位置和偏移量写入索引，
+      // 且将合并的data文件临时文件重命名，索引文件的临时文件重命名
       shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, tmp);
     } finally {
       if (tmp.exists() && !tmp.delete()) {
         logger.error("Error while deleting temp file {}", tmp.getAbsolutePath());
       }
     }
+    // 封装并返回任何结果
     mapStatus = MapStatus$.MODULE$.apply(blockManager.shuffleServerId(), partitionLengths);
   }
 
@@ -182,22 +200,26 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
    */
   private long[] writePartitionedFile(File outputFile) throws IOException {
     // Track location of the partition starts in the output file
+    // 构建一个分区数量的数组
     final long[] lengths = new long[numPartitions];
     if (partitionWriters == null) {
       // We were passed an empty iterator
       return lengths;
     }
 
+    // 创建合并文件的临时文件输出流
     final FileOutputStream out = new FileOutputStream(outputFile, true);
     final long writeStartTime = System.nanoTime();
     boolean threwException = true;
     try {
       for (int i = 0; i < numPartitions; i++) {
+        // 获取该分区对应的FileSegment对应的文件
         final File file = partitionWriterSegments[i].file();
         if (file.exists()) {
           final FileInputStream in = new FileInputStream(file);
           boolean copyThrewException = true;
           try {
+            // 把该文件拷贝到合并文件的临时文件，并返回文件长度
             lengths[i] = Utils.copyStream(in, out, false, transferToEnabled);
             copyThrewException = false;
           } finally {
