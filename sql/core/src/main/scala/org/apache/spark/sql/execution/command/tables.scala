@@ -20,15 +20,18 @@ package org.apache.spark.sql.execution.command
 import java.io.File
 import java.net.URI
 import java.nio.file.FileSystems
+import java.util
 import java.util.Date
+
+import com.google.common.base.{Joiner, Predicate}
+import com.google.common.collect.Iterables
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 import scala.util.Try
-
 import org.apache.commons.lang3.StringEscapeUtils
-import org.apache.hadoop.fs.Path
-
+import org.apache.hadoop.fs.{FsShell, Path}
+import org.apache.hadoop.fs.permission.{AclEntry, AclEntryScope, AclEntryType, FsAction}
 import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
 import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionException
@@ -467,8 +470,39 @@ case class TruncateTableCommand(
         val path = new Path(location.get)
         try {
           val fs = path.getFileSystem(hadoopConf)
+          // save location oringin info
+          val fileStatus = fs.getFileStatus(path)
+          val aclStatus = fs.getAclStatus(path)
+          // delete location
           fs.delete(path, true)
-          fs.mkdirs(path)
+          fs.mkdirs(path, fileStatus.getPermission)
+          // set location oringin info
+          try {
+            val fsShell = new FsShell()
+            fsShell.setConf(hadoopConf)
+            fsShell.run(Array[String]("-chgrp", "-R", fileStatus.getGroup, path.toString))
+            if (aclStatus != null) {
+              val aclEntries: util.List[AclEntry] = aclStatus.getEntries
+              removeBaseAclEntries(aclEntries)
+              // the ACL api's also expect the tradition user/group/other permission in the form of ACL.
+
+              val sourcePerm = fileStatus.getPermission()
+              aclEntries.add(newAclEntry(
+                AclEntryScope.ACCESS, AclEntryType.USER, sourcePerm.getUserAction))
+              aclEntries.add(newAclEntry(
+                AclEntryScope.ACCESS, AclEntryType.GROUP, sourcePerm.getGroupAction))
+              aclEntries.add(newAclEntry(
+                AclEntryScope.ACCESS, AclEntryType.OTHER, sourcePerm.getOtherAction))
+              // construct the -setfacl command
+              val aclEntry: String = Joiner.on(",").join(aclStatus.getEntries)
+              fsShell.run(Array[String]("-setfacl", "-R", "--set", aclEntry, path.toString))
+              val permission = Integer.toString(fileStatus.getPermission.toShort, 8)
+              log.info("truncate table : permission=" + permission)
+            }
+          } catch {
+            case e: Exception =>
+              log.warn("Error setting permissions of " + location, e)
+          }
         } catch {
           case NonFatal(e) =>
             throw new AnalysisException(
@@ -488,6 +522,24 @@ case class TruncateTableCommand(
         log.warn(s"Exception when attempting to uncache table $tableIdentWithDB", e)
     }
     Seq.empty[Row]
+  }
+
+  /**
+    * Removes basic permission acls (unamed acls) from the list of acl entries
+    *
+    * @param entries acl entries to remove from.
+    */
+  private def removeBaseAclEntries(entries: util.List[AclEntry]) = {
+    Iterables.removeIf(entries, new Predicate[AclEntry]() {
+      override def apply(input: AclEntry): Boolean = {
+        if (input.getName == null) return true
+        false
+      }
+    })
+  }
+
+  private def newAclEntry(scope: AclEntryScope, `type`: AclEntryType, permission: FsAction) = {
+    new AclEntry.Builder().setScope(scope).setType(`type`).setPermission(permission).build
   }
 }
 
