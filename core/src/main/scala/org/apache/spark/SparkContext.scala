@@ -1548,7 +1548,10 @@ class SparkContext(config: SparkConf) extends Logging {
       schemeCorrectedPath
     }
     val timestamp = System.currentTimeMillis
-    if (addedFiles.putIfAbsent(key, timestamp).isEmpty) {
+
+    // 如果spark.addfiles.overwrite参数为true，则每次add file文件时都会重新add
+    val addFileOverwrite = conf.getBoolean("spark.addFiles.overwrite", defaultValue = false)
+    if (addFileOverwrite || addedFiles.putIfAbsent(key, timestamp).isEmpty) {
       logInfo(s"Added file $path at $key with timestamp $timestamp")
       // Fetch the file locally so that closures which are run on the driver can still use the
       // SparkFiles API to access files.
