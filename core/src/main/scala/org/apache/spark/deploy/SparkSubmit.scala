@@ -116,6 +116,7 @@ object SparkSubmit extends CommandLineUtils {
       // scalastyle:on println
     }
     appArgs.action match {
+      // 执行这一句，转到submit方法
       case SparkSubmitAction.SUBMIT => submit(appArgs)
       case SparkSubmitAction.KILL => kill(appArgs)
       case SparkSubmitAction.REQUEST_STATUS => requestStatus(appArgs)
@@ -671,6 +672,7 @@ object SparkSubmit extends CommandLineUtils {
    * Note that this main class will not be the one provided by the user if we're
    * running cluster deploy mode or python applications.
    */
+  // runMain方法中是通过反射机制 mainMethod.invoke(null, childArgs.toArray)执行最后我们提交的类
   private def runMain(
       childArgs: Seq[String],
       childClasspath: Seq[String],

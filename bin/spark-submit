@@ -16,7 +16,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
+# -z是检查后面变量是否为空（空则真） shell可以在双引号之内引用变量，单引号不可
+# 这一步作用是检查SPARK_HOME变量是否为空，为空则执行then后面程序
+# source命令： source filename作用在当前bash环境下读取并执行filename中的命令
+# $0代表shell脚本文件本身的文件名，这里即使spark-submit
+# dirname用于取得脚本文件所在目录 dirname $0取得当前脚本文件所在目录
+# $(命令)表示返回该命令的结果
+# 故整个if语句的含义是：如果SPARK_HOME变量没有设置值，则执行当前目录下的find-spark-home脚本文件，设置SPARK_HOME值
 if [ -z "${SPARK_HOME}" ]; then
   source "$(dirname "$0")"/find-spark-home
 fi
@@ -24,4 +30,10 @@ fi
 # disable randomized hash for string in Python 3.3+
 export PYTHONHASHSEED=0
 
+# 执行spark-class脚本，传递参数org.apache.spark.deploy.SparkSubmit 和"$@"
+# 这里$@表示之前spark-submit接收到的全部参数
 exec "${SPARK_HOME}"/bin/spark-class org.apache.spark.deploy.SparkSubmit "$@"
+
+############################################
+# spark-submit脚本的整体逻辑就是：
+# 首先 检查SPARK_HOME是否设置；if 已经设置 执行spark-class文件 否则加载执行find-spark-home文件

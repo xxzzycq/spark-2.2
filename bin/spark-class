@@ -17,13 +17,20 @@
 # limitations under the License.
 #
 
+# 依旧是检查设置SPARK_HOME的值
 if [ -z "${SPARK_HOME}" ]; then
   source "$(dirname "$0")"/find-spark-home
 fi
 
+# 执行load-spark-env.sh脚本文件，主要目的在于加载设定一些变量值
+# 设定spark-env.sh中的变量值到环境变量中，供后续使用
+# 设定scala版本变量值
 . "${SPARK_HOME}"/bin/load-spark-env.sh
 
 # Find the java binary
+# 检查设定java环境值
+# -n代表检测变量长度是否为0，不为0时候为真
+# 如果已经安装Java没有设置JAVA_HOME,command -v java返回的值为${JAVA_HOME}/bin/java
 if [ -n "${JAVA_HOME}" ]; then
   RUNNER="${JAVA_HOME}/bin/java"
 else
@@ -36,6 +43,8 @@ else
 fi
 
 # Find Spark jars.
+# -d检测文件是否为目录，若为目录则为真
+# 设置一些关联Class文件
 if [ -d "${SPARK_HOME}/jars" ]; then
   SPARK_JARS_DIR="${SPARK_HOME}/jars"
 else
@@ -67,12 +76,14 @@ fi
 #
 # The exit code of the launcher is appended to the output, so the parent shell removes it from the
 # command array and checks the value to see if the launcher succeeded.
+# 执行类文件org.apache.spark.launcher.Main，返回解析后的参数
 build_command() {
   "$RUNNER" -Xmx128m -cp "$LAUNCH_CLASSPATH" org.apache.spark.launcher.Main "$@"
   printf "%d\0" $?
 }
 
 # Turn off posix mode since it does not allow process substitution
+# 将build_command方法解析后的参数赋给CMD
 set +o posix
 CMD=()
 while IFS= read -d '' -r ARG; do
@@ -96,4 +107,9 @@ if [ $LAUNCHER_EXIT_CODE != 0 ]; then
 fi
 
 CMD=("${CMD[@]:0:$LAST}")
+# 执行CMD中的某个参数类org.apache.spark.deploy.SparkSubmit
 exec "${CMD[@]}"
+
+####################################################
+# spark-class文件的执行逻辑稍显复杂，总体上应该是这样的：
+# 检查SPARK_HOME的值-》执行load-spark-env.sh文件，设定一些需要用到的环境变量，如scala环境值，这其中也加载了spark-env.sh文件->检查设定java的执行路径变量值-》寻找spark jars,设定一些引用相关类的位置变量-》执行类文件org.apache.spark.launcher.Main，返回解析后的参数给CMD-》判断解析参数是否正确（代表了用户设置的参数是否正确）-》正确的话执行org.apache.spark.deploy.SparkSubmit这个类

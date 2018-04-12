@@ -112,6 +112,7 @@ class SparkSubmitCommandBuilder extends AbstractCommandBuilder {
     List<String> submitArgs = args;
 
     if (args.size() > 0) {
+      // 解析参数，选择类型，这里我们是SPARK_SHELL
       switch (args.get(0)) {
         case PYSPARK_SHELL:
           this.allowsMixedArguments = true;
@@ -119,6 +120,7 @@ class SparkSubmitCommandBuilder extends AbstractCommandBuilder {
           submitArgs = args.subList(1, args.size());
           break;
 
+        // 执行这一步 ，进行参数截取，去掉第一个类型选择参数
         case SPARKR_SHELL:
           this.allowsMixedArguments = true;
           appResource = SPARKR_SHELL;
@@ -130,6 +132,7 @@ class SparkSubmitCommandBuilder extends AbstractCommandBuilder {
           submitArgs = args.subList(1, args.size());
       }
 
+      // 创建解析器，解析参数，看一下**parse方法**，见下面
       this.isExample = isExample;
       OptionParser parser = new OptionParser();
       parser.parse(submitArgs);

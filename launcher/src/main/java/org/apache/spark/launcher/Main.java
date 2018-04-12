@@ -55,8 +55,10 @@ class Main {
 
     boolean printLaunchCommand = !isEmpty(System.getenv("SPARK_PRINT_LAUNCH_COMMAND"));
     AbstractCommandBuilder builder;
+    // 这一步做判断，我们在之前传入了org.apache.spark.deploy.SparkSubmit这个参数，所以是正确的
     if (className.equals("org.apache.spark.deploy.SparkSubmit")) {
       try {
+        // 执行这句话，主要的参数解析核心方法也是这句话，接着看一下SparkSubmitCommandBuilder类，见下面
         builder = new SparkSubmitCommandBuilder(args);
       } catch (IllegalArgumentException e) {
         printLaunchCommand = false;
@@ -89,6 +91,7 @@ class Main {
       System.err.println("========================================");
     }
 
+    // 系统类型判断
     if (isWindows()) {
       System.out.println(prepareWindowsCommand(cmd, env));
     } else {

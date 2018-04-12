@@ -135,6 +135,8 @@ class SparkSubmitOptionParser {
    *
    * @throws IllegalArgumentException If an error is found during parsing.
    */
+  // 整个过程就是参数解析验证的过程，这里有一个很重要的二维数组用于验证，即opts
+  // opts具体包含元素见下面
   protected final void parse(List<String> args) {
     Pattern eqSeparatedOpt = Pattern.compile("(--[^=]+)=(.+)");
 
@@ -150,6 +152,7 @@ class SparkSubmitOptionParser {
       }
 
       // Look for options with a value.
+      // opts数组内容：包含了我们设置了参数名称
       String name = findCliOption(arg, opts);
       if (name != null) {
         if (value == null) {
